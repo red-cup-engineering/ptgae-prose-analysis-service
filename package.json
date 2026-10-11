@@ -1,0 +1,13 @@
+{
+  "name": "@red-cup-engineering/ptgae-prose-analysis-service",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Source-anchored conservative PTGAE prose diagnostics.",
+  "exports": {
+    ".": "./src/analyze.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

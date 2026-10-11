@@ -24,61 +24,100 @@ const RULES = [
   { id: "PTG044", severity: "warning", pattern: /\bIts material is organized by artifact role under `content\/`; specialized\s+subdomains continue under `services\/`\./gi, message: "Repeated scaffold tail is generator/template evidence, not section-specific scope." }
 ];
 
-function straightQuoteEnd(source, start) {
-  for (let i = start + 1; i < source.length; i++) {
-    if (source[i] === '"' && source[i - 1] !== "\\") return i;
-    if (source[i] === "\n") return -1;
+// All offsets are UTF-16 code-unit offsets, the same coordinates as String.slice
+// and RegExp match.index. Never spread the string into Unicode code points.
+export function protectedPtgaeSpans(source) {
+  if (typeof source !== 'string') throw new TypeError('source must be a string');
+  const marks = new Uint8Array(source.length);
+  const protect = (from, to) => { for (let i = from; i < to; i++) marks[i] = 1; };
+  let cursor = 0;
+  let lineNo = 0;
+  let inFrontmatter = false;
+  let fence = null;
+  while (cursor < source.length) {
+    const newLine = source.indexOf('\n', cursor);
+    const end = newLine < 0 ? source.length : newLine;
+    const line = source.slice(cursor, end).replace(/\r$/u, '');
+    const opening = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+    if (lineNo === 0 && /^\uFEFF?---\s*$/u.test(line)) inFrontmatter = true;
+    if (inFrontmatter) {
+      protect(cursor, end);
+      if (lineNo > 0 && /^\s*(?:---|\.\.\.)\s*$/u.test(line)) inFrontmatter = false;
+    } else if (fence) {
+      protect(cursor, end);
+      const closing = /^ {0,3}(`+|~+)\s*$/u.exec(line);
+      if (closing && closing[1][0] === fence.marker && closing[1].length >= fence.size) fence = null;
+    } else if (opening) {
+      fence = { marker: opening[1][0], size: opening[1].length };
+      protect(cursor, end);
+    } else if (/^ {0,3}>/u.test(line) || /^(?: {4}|\t)/u.test(line)
+      || /^ {0,3}\[[^\]]+\]:\s*\S/u.test(line)) {
+      protect(cursor, end);
+    } else if (line.includes('|')) {
+      // A conservative text lint, not a Markdown parser: table cells are protected.
+      protect(cursor, end);
+    }
+    cursor = newLine < 0 ? source.length : newLine + 1;
+    lineNo++;
   }
-  return -1;
+
+  const escaped = i => { let n = 0; for (let j = i-1; j >= 0 && source[j] === '\\'; j--) n++; return n % 2 === 1; };
+  const findClosingQuote = (at, closing) => {
+    for (let j = at + 1; j < source.length && source[j] !== '\n'; j++) {
+      if (marks[j]) return -1;
+      if (source[j] === closing && !escaped(j)) return j;
+    }
+    return -1;
+  };
+  for (let i = 0; i < source.length; i++) {
+    if (marks[i] || escaped(i)) continue;
+    if (source[i] === '`') {
+      let n = 1; while (source[i+n] === '`') n++;
+      let closing = -1;
+      for (let j = i+n; j < source.length; j++) {
+        if (marks[j]) break;
+        if (source[j] !== '`') continue;
+        let k = j+1; while (source[k] === '`') k++;
+        if (k-j === n) { closing = k; break; }
+        j = k-1;
+      }
+      if (closing !== -1) { protect(i, closing); i = closing-1; }
+      else { protect(i, source.length); break; }
+    } else if (source[i] === '"' || source[i] === '“') {
+      const closing = findClosingQuote(i, source[i] === '“' ? '”' : '"');
+      if (closing !== -1) { protect(i, closing+1); i = closing; }
+      else { const eol = source.indexOf('\n', i); const end = eol < 0 ? source.length : eol; protect(i, end); i = end-1; }
+    } else if (source[i] === ']' && source[i+1] === '(') {
+      // Protect Markdown link destinations, not the prose of the link label.
+      let depth = 1, j = i+2;
+      for (; j < source.length && source[j] !== '\n' && !marks[j]; j++) {
+        if (escaped(j)) continue;
+        if (source[j] === '(') depth++;
+        if (source[j] === ')' && --depth === 0) break;
+      }
+      if (j < source.length && source[j] === ')' && depth === 0) {
+        protect(i+1, j+1); i = j;
+      } else {
+        const eol = source.indexOf('\n', i); const end = eol < 0 ? source.length : eol;
+        protect(i+1, end); i = end-1;
+      }
+    }
+  }
+  const spans = [];
+  for (let i=0; i<marks.length;) {
+    if (!marks[i]) { i++; continue; }
+    const start=i; while(i<marks.length&&marks[i]) i++;
+    spans.push([start,i]);
+  }
+  return spans;
 }
 
-function maskProtected(source) {
-  const chars = [...source];
-  const masked = [...source];
-  let fence = null;
-  let inline = false;
-  for (let i = 0; i < chars.length; i++) {
-    if (!fence && !inline && (i === 0 || chars[i - 1] === "\n")) {
-      const end = source.indexOf("\n", i);
-      const lineEnd = end === -1 ? source.length : end;
-      if (/^\s{0,3}>/.test(source.slice(i, lineEnd))) {
-        for (let j = i; j < lineEnd; j++) masked[j] = " ";
-        i = lineEnd - 1;
-        continue;
-      }
-    }
-    const three = source.slice(i, i + 3);
-    if (!inline && (three === "```" || three === "~~~")) {
-      if (!fence) fence = three;
-      else if (fence === three) fence = null;
-      for (let j = 0; j < 3; j++) masked[i + j] = " ";
-      i += 2;
-      continue;
-    }
-    if (!fence && chars[i] === "`") {
-      inline = !inline;
-      masked[i] = " ";
-      continue;
-    }
-    if (!fence && !inline && chars[i] === '"') {
-      const end = straightQuoteEnd(source, i);
-      if (end !== -1) {
-        for (let j = i; j <= end; j++) if (chars[j] !== "\n") masked[j] = " ";
-        i = end;
-        continue;
-      }
-    }
-    if (!fence && !inline && chars[i] === "“") {
-      const end = source.indexOf("”", i + 1);
-      if (end !== -1 && !source.slice(i, end + 1).includes("\n")) {
-        for (let j = i; j <= end; j++) if (chars[j] !== "\n") masked[j] = " ";
-        i = end;
-        continue;
-      }
-    }
-    if (fence || inline) if (chars[i] !== "\n") masked[i] = " ";
+function maskProtected(source, spans) {
+  const masked = source.split(''); // UTF-16 code units
+  for (const [start, end] of spans) {
+    for (let i=start;i<end;i++) if (masked[i] !== '\n' && masked[i] !== '\r') masked[i]=' ';
   }
-  return masked.join("");
+  return masked.join('');
 }
 
 function position(source, index) {
@@ -88,25 +127,33 @@ function position(source, index) {
   return { line, column: index - last };
 }
 
+/** Unverified stylistic diagnostics. Coordinates are UTF-16 half-open source spans. */
 export function analyzePTGAE(source, { sourceVersion = null } = {}) {
-  const visible = maskProtected(source);
+  if (typeof source !== 'string') throw new TypeError('source must be a string');
+  const protectedSpans = protectedPtgaeSpans(source);
+  const visible = maskProtected(source, protectedSpans);
   const findings = [];
   for (const rule of RULES) {
     rule.pattern.lastIndex = 0;
     for (const match of visible.matchAll(rule.pattern)) {
-      const at = position(source, match.index ?? 0);
+      const start = match.index ?? 0;
+      const end = start + match[0].length;
+      // A regex may bridge masked regions through whitespace or a wildcard.
+      if (protectedSpans.some(([lo, hi]) => start < hi && end > lo)) continue;
+      const at = position(source, start);
       findings.push({
         ruleId: rule.id,
         severity: rule.severity,
         line: at.line,
         column: at.column,
-        text: match[0],
+        sourceSpan: [start, end],
+        text: source.slice(start, end),
         message: rule.message,
         sourceVersion
       });
     }
   }
-  return findings.sort((a,b) => a.line-b.line || a.column-b.column || a.ruleId.localeCompare(b.ruleId));
+  return findings.sort((a,b) => a.sourceSpan[0]-b.sourceSpan[0] || a.ruleId.localeCompare(b.ruleId));
 }
 
 export function summarizeCorpus(files) {
