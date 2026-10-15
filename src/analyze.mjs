@@ -26,7 +26,7 @@ const RULES = [
 
 // All offsets are UTF-16 code-unit offsets, the same coordinates as String.slice
 // and RegExp match.index. Never spread the string into Unicode code points.
-export function protectedPtgaeSpans(source) {
+export function protectedPtgaeSpans(source, {protectTables = true} = {}) {
   if (typeof source !== 'string') throw new TypeError('source must be a string');
   const marks = new Uint8Array(source.length);
   const protect = (from, to) => { for (let i = from; i < to; i++) marks[i] = 1; };
@@ -53,7 +53,7 @@ export function protectedPtgaeSpans(source) {
     } else if (/^ {0,3}>/u.test(line) || /^(?: {4}|\t)/u.test(line)
       || /^ {0,3}\[[^\]]+\]:\s*\S/u.test(line)) {
       protect(cursor, end);
-    } else if (line.includes('|')) {
+    } else if (protectTables && line.includes('|')) {
       // A conservative text lint, not a Markdown parser: table cells are protected.
       protect(cursor, end);
     }
