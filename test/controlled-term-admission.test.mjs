@@ -16,7 +16,8 @@ const profile={
   ]
 };
 const H=text=>createHash("sha256").update(text,"utf8").digest("hex");
-const a=(text,options)=>auditCanonicalTerms(text,profile,options);
+const PROFILE_SHA=H(JSON.stringify(profile));
+const a=(text,options)=>auditCanonicalTerms(text,profile,{profileSourceSha256:PROFILE_SHA,...options});
 
 test("source spans are UTF-16, deterministic, and distinguish canonical terms",()=>{
   const text="🌊 The witness allocates attention. WIT is counted.";
@@ -41,7 +42,7 @@ test("quotations, URLs, code, frontmatter are protected; table prose is audited"
 });
 test("exact reviewer receipt binds source hash, offsets, authority, required referents",()=>{
   const text="A WIT.", candidate=a(text).candidates[0];
-  const receipt={fileContentSha256:H(text),sourceSpan:candidate.sourceSpan,matchedText:candidate.text,
+  const receipt={fileContentSha256:H(text),profileContentSha256:PROFILE_SHA,sourceVersion:null,sourceSpan:candidate.sourceSpan,matchedText:candidate.text,
     term:"WIT",sort:"four-cover",details:{cellRef:"c",fromCharge:"bottom",toCharge:"true",evidenceRef:"e"},
     sourceRef:profile.canonicalTerms[0].source,reviewedBy:"office:science"};
   const r=a(text,{receipts:[receipt]});
@@ -59,10 +60,31 @@ test("exact reviewer receipt binds source hash, offsets, authority, required ref
   assert.equal(bad.staleReceipts,1);
   assert.equal(a(text+" changed",{receipts:[receipt]}).disposition,"review-required");
 });
+test("source review is invalid across Science policy or document changes",()=>{
+  const text="A WIT.", candidate=a(text).candidates[0];
+  const reviewed={fileContentSha256:H(text),profileContentSha256:PROFILE_SHA,
+    sourceVersion:"docs/a.md",sourceSpan:candidate.sourceSpan,matchedText:candidate.text,
+    term:"WIT",sort:"four-cover",details:{cellRef:"cell",fromCharge:"bottom",toCharge:"true",evidenceRef:"e"},
+    sourceRef:profile.canonicalTerms[0].source,reviewedBy:"office:science"};
+  const accepted=a(text,{sourceVersion:"docs/a.md",receipts:[reviewed]});
+  assert.equal(accepted.disposition,"lexically-receipted");
+  assert.equal(accepted.profileSourceSha256,PROFILE_SHA);
+  const otherSource=a(text,{sourceVersion:"docs/b.md",receipts:[reviewed]});
+  assert.equal(otherSource.disposition,"review-required");
+  assert.equal(otherSource.staleReceipts,1);
+  const otherProfile=a(text,{sourceVersion:"docs/a.md",profileSourceSha256:"b".repeat(64),receipts:[reviewed]});
+  assert.equal(otherProfile.disposition,"review-required");
+  assert.equal(otherProfile.staleReceipts,1);
+  const oldReceipt=a(text,{sourceVersion:"docs/a.md",receipts:[{...reviewed,profileContentSha256:undefined}]});
+  assert.equal(oldReceipt.disposition,"review-required");
+  assert.throws(()=>auditCanonicalTerms(text,profile,{receipts:[reviewed]}),/exact Science profile source SHA-256/);
+  assert.throws(()=>a(text,{profileSourceSha256:"not-hex"}),/Invalid Science profile SHA-256/);
+});
+
 test("distinct scientific sense needs explicit authority and positive attribution",()=>{
   const text="The witness testified in court.";
   const c=a(text).candidates[0];
-  const valid={fileContentSha256:H(text),sourceSpan:c.sourceSpan,matchedText:c.text,term:"WIT",
+  const valid={fileContentSha256:H(text),profileContentSha256:PROFILE_SHA,sourceVersion:null,sourceSpan:c.sourceSpan,matchedText:c.text,term:"WIT",
     sort:"foreign-discipline",sourceRef:"https://example.edu/court-procedure",
     reviewedBy:"office:law",details:{domain:"legal witness",reason:"testimony role, not a FOUR cover"}};
   assert.equal(a(text,{receipts:[valid]}).disposition,"lexically-receipted");
@@ -71,7 +93,7 @@ test("distinct scientific sense needs explicit authority and positive attributio
 });
 test("duplicate receipts and stale source identities remain visible",()=>{
   const text="wit wit",c=a(text).candidates[0];
-  const ok={fileContentSha256:H(text),sourceSpan:c.sourceSpan,matchedText:c.text,
+  const ok={fileContentSha256:H(text),profileContentSha256:PROFILE_SHA,sourceVersion:null,sourceSpan:c.sourceSpan,matchedText:c.text,
     term:"WIT",sort:"four-cover",
     details:{cellRef:"c",fromCharge:"bottom",toCharge:"true",evidenceRef:"e"},
     sourceRef:"https://example.edu/wit",reviewedBy:"office"};
