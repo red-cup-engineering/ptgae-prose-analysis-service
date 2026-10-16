@@ -41,13 +41,19 @@ test("quotations, URLs, code, frontmatter are protected; table prose is audited"
 });
 test("exact reviewer receipt binds source hash, offsets, authority, required referents",()=>{
   const text="A WIT.", candidate=a(text).candidates[0];
-  const receipt={sourceSha256:H(text),sourceSpan:candidate.sourceSpan,matchedText:candidate.text,
+  const receipt={fileContentSha256:H(text),sourceSpan:candidate.sourceSpan,matchedText:candidate.text,
     term:"WIT",sort:"four-cover",details:{cellRef:"c",fromCharge:"bottom",toCharge:"true",evidenceRef:"e"},
     sourceRef:profile.canonicalTerms[0].source,reviewedBy:"office:science"};
   const r=a(text,{receipts:[receipt]});
   assert.equal(r.disposition,"lexically-receipted");
   assert.equal(r.reviewedCount,1);
   assert.equal(r.semanticTruth,"not-established");
+  // Engineering must not accept the earlier, noncanonical receipt key.
+  const wrongKey={...receipt,sourceSha256:receipt.fileContentSha256};
+  delete wrongKey.fileContentSha256;
+  const mismatched=a(text,{receipts:[wrongKey]});
+  assert.equal(mismatched.disposition,"review-required");
+  assert.equal(mismatched.staleReceipts,1);
   const bad=a(text,{receipts:[{...receipt, details:{cellRef:"c"}}]});
   assert.equal(bad.disposition,"review-required");
   assert.equal(bad.staleReceipts,1);
@@ -56,15 +62,16 @@ test("exact reviewer receipt binds source hash, offsets, authority, required ref
 test("distinct scientific sense needs explicit authority and positive attribution",()=>{
   const text="The witness testified in court.";
   const c=a(text).candidates[0];
-  const valid={sourceSha256:H(text),sourceSpan:c.sourceSpan,matchedText:c.text,term:"WIT",
+  const valid={fileContentSha256:H(text),sourceSpan:c.sourceSpan,matchedText:c.text,term:"WIT",
     sort:"foreign-discipline",sourceRef:"https://example.edu/court-procedure",
     reviewedBy:"office:law",details:{domain:"legal witness",reason:"testimony role, not a FOUR cover"}};
   assert.equal(a(text,{receipts:[valid]}).disposition,"lexically-receipted");
   assert.equal(a(text,{receipts:[{...valid,sourceRef:""}]}).disposition,"review-required");
+  assert.equal(a(text,{receipts:[{...valid,sourceRef:profile.canonicalTerms[0].source}]}).disposition,"review-required");
 });
 test("duplicate receipts and stale source identities remain visible",()=>{
   const text="wit wit",c=a(text).candidates[0];
-  const ok={sourceSha256:H(text),sourceSpan:c.sourceSpan,matchedText:c.text,
+  const ok={fileContentSha256:H(text),sourceSpan:c.sourceSpan,matchedText:c.text,
     term:"WIT",sort:"four-cover",
     details:{cellRef:"c",fromCharge:"bottom",toCharge:"true",evidenceRef:"e"},
     sourceRef:"https://example.edu/wit",reviewedBy:"office"};
