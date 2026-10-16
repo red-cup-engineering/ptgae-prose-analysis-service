@@ -40,8 +40,10 @@ function validateProfile(profile) {
   return profile;
 }
 
-function isReceipt(candidate, receipt, sourceHash, term) {
+function isReceipt(candidate, receipt, sourceHash, term, profileSourceSha256, sourceVersion) {
   if (!receipt || receipt.fileContentSha256 !== sourceHash ||
+      receipt.profileContentSha256 !== profileSourceSha256 ||
+      receipt.sourceVersion !== sourceVersion ||
       receipt.term !== candidate.term || receipt.matchedText !== candidate.text ||
       !Array.isArray(receipt.sourceSpan) || receipt.sourceSpan.length !== 2 ||
       receipt.sourceSpan[0] !== candidate.sourceSpan[0] ||
@@ -64,11 +66,15 @@ function isReceipt(candidate, receipt, sourceHash, term) {
  * Passing the review-receipt gate cannot establish the mathematics or truth
  * of the reviewed sentences; semantic responsibility stays with their owner.
  */
-export function auditCanonicalTerms(source, profile, {receipts = [], sourceVersion = null} = {}) {
+export function auditCanonicalTerms(source, profile, {receipts = [], sourceVersion = null, profileSourceSha256 = null} = {}) {
   if (typeof source !== "string") throw new TypeError("source must be a string");
   if (!Array.isArray(receipts) || receipts.some(x => !x || typeof x !== "object"))
     throw new TypeError("receipts must be an array of objects");
   if (sourceVersion !== null && !present(sourceVersion)) throw new TypeError("Invalid source version");
+  if (profileSourceSha256 !== null && !/^[a-f0-9]{64}$/u.test(profileSourceSha256))
+    throw new TypeError("Invalid Science profile SHA-256");
+  if (receipts.length > 0 && profileSourceSha256 === null)
+    throw new TypeError("Review receipts require the exact Science profile source SHA-256");
   validateProfile(profile);
   const sourceSha256 = hash(source);
   // Existing style lint protects whole Markdown table rows. This audit
@@ -96,7 +102,7 @@ export function auditCanonicalTerms(source, profile, {receipts = [], sourceVersi
     const term = profile.canonicalTerms.find(t => t.id === candidate.term);
     let index = -1;
     for (let j=0; j<receipts.length; j++) {
-      if (!usedReceipts.has(j) && isReceipt(candidate, receipts[j], sourceSha256, term)) {
+      if (!usedReceipts.has(j) && isReceipt(candidate, receipts[j], sourceSha256, term, profileSourceSha256, sourceVersion)) {
         index=j; break;
       }
     }
@@ -109,6 +115,7 @@ export function auditCanonicalTerms(source, profile, {receipts = [], sourceVersi
   return {
     kind:"ptgae.canonical-term-audit/v1",
     profileId:profile.id,
+    profileSourceSha256,
     source:{sha256:sourceSha256, utf16Length:source.length, sourceVersion},
     candidates, reviewedCount:candidates.length-unbound.length,
     unresolvedCount:unbound.length, staleReceipts,
