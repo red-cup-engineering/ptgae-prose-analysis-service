@@ -66,15 +66,25 @@ function isReceipt(candidate, receipt, sourceHash, term, profileSourceSha256, so
  * Passing the review-receipt gate cannot establish the mathematics or truth
  * of the reviewed sentences; semantic responsibility stays with their owner.
  */
-export function auditCanonicalTerms(source, profile, {receipts = [], sourceVersion = null, profileSourceSha256 = null} = {}) {
+export function auditCanonicalTerms(source, profile, {receipts = [], sourceVersion = null, profileSourceSha256 = null, profileSourceText = null} = {}) {
   if (typeof source !== "string") throw new TypeError("source must be a string");
   if (!Array.isArray(receipts) || receipts.some(x => !x || typeof x !== "object"))
     throw new TypeError("receipts must be an array of objects");
   if (sourceVersion !== null && !present(sourceVersion)) throw new TypeError("Invalid source version");
   if (profileSourceSha256 !== null && !/^[a-f0-9]{64}$/u.test(profileSourceSha256))
     throw new TypeError("Invalid Science profile SHA-256");
-  if (receipts.length > 0 && profileSourceSha256 === null)
-    throw new TypeError("Review receipts require the exact Science profile source SHA-256");
+  if (profileSourceSha256 !== null) {
+    // A claimed digest is not custody: obtain it from the *same* actual Science
+    // policy text the caller parsed, refusing mismatched bytes or structure.
+    if (typeof profileSourceText !== "string" || hash(profileSourceText) !== profileSourceSha256)
+      throw new TypeError("Science profile SHA-256 does not match exact supplied policy text");
+    if (JSON.stringify(JSON.parse(profileSourceText)) !== JSON.stringify(profile))
+      throw new TypeError("Science profile object differs from supplied policy text");
+  } else if (profileSourceText !== null) {
+    throw new TypeError("Science profile text requires its verified SHA-256");
+  }
+  if (receipts.length > 0 && (profileSourceSha256 === null || sourceVersion === null))
+    throw new TypeError("Review receipts require verified Science policy bytes and nonempty reviewed source identity");
   validateProfile(profile);
   const sourceSha256 = hash(source);
   // Existing style lint protects whole Markdown table rows. This audit
