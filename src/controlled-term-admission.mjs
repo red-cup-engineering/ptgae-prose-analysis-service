@@ -41,7 +41,7 @@ function validateProfile(profile) {
 }
 
 function isReceipt(candidate, receipt, sourceHash, term) {
-  if (!receipt || receipt.sourceSha256 !== sourceHash ||
+  if (!receipt || receipt.fileContentSha256 !== sourceHash ||
       receipt.term !== candidate.term || receipt.matchedText !== candidate.text ||
       !Array.isArray(receipt.sourceSpan) || receipt.sourceSpan.length !== 2 ||
       receipt.sourceSpan[0] !== candidate.sourceSpan[0] ||
@@ -52,6 +52,8 @@ function isReceipt(candidate, receipt, sourceHash, term) {
   const foreign = receipt.sort === "foreign-discipline";
   const kind = term.admissibleSorts.find(s => s.id === receipt.sort);
   if (!foreign && !kind) return false;
+  // A distinct-discipline receipt cannot cite the canonical monetary source as its authority.
+  if (foreign && receipt.sourceRef === term.source) return false;
   const fields = foreign ? ["domain", "reason"] : kind.required;
   return fields.every(k => present(receipt.details[k])) &&
     (foreign || receipt.sourceRef === term.source);
