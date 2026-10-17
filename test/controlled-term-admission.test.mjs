@@ -89,9 +89,10 @@ test("source review is invalid across Science policy or document changes",()=>{
   assert.equal(otherProfile.staleReceipts,1);
   assert.throws(()=>a(text,{profileSourceSha256:"b".repeat(64)}),/does not match exact supplied policy text/);
   assert.throws(()=>a(text,{profileSourceText:JSON.stringify({...profile,id:"forged-policy"})}),/does not match exact supplied policy text/);
+  const forgedProfileText=JSON.stringify({...profile,id:"forged-policy"});
   assert.throws(()=>auditCanonicalTerms(text,profile,{
-    sourceVersion:"docs/a.md",profileSourceSha256:PROFILE_SHA,
-    profileSourceText:JSON.stringify({...profile,id:"forged-policy"}),receipts:[reviewed]
+    sourceVersion:"docs/a.md",profileSourceSha256:H(forgedProfileText),
+    profileSourceText:forgedProfileText,receipts:[reviewed]
   }),/Science profile object differs from supplied policy text/);
   const oldReceipt=a(text,{sourceVersion:"docs/a.md",receipts:[{...reviewed,profileContentSha256:undefined}]});
   assert.equal(oldReceipt.disposition,"review-required");
