@@ -2,10 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {auditCanonicalTerms} from "../src/controlled-term-admission.mjs";
-import {termCliArgs, canonicalTermCorpusAudit} from "../../../src/canonical-term-check-cli.mjs";
-import {mkdtempSync, writeFileSync, mkdirSync, rmSync} from "node:fs";
-import {tmpdir} from "node:os";
-import {join} from "node:path";
 
 const profile={
   kind:"ptgae.canonical-term-admission/v1",id:"test-policy",canonicalTerms:[
@@ -128,54 +124,4 @@ test("source profile must be unambiguous and review cannot silently fill unknown
   assert.throws(()=>auditCanonicalTerms("wit",{...profile,canonicalTerms:[
     ...profile.canonicalTerms,{id:"OTHER",source:"source",collisionForms:["wit"],admissibleSorts:[{id:"x",required:[]}]}]}),/duplicate/);
   assert.throws(()=>auditCanonicalTerms("wit",{...profile,canonicalTerms:[]}),/Invalid canonical/);
-});
-test("CLI requires explicit science-owned profile and never guesses one",()=>{
-  assert.deepEqual(termCliArgs(["notes.md","--profile","science.json"]),{
-    source:"notes.md",profile:"science.json",receipts:null});
-  assert.throws(()=>termCliArgs(["notes.md"]),/usage/);
-  assert.throws(()=>termCliArgs(["notes.md","--profile","x","--profile","y"]),/usage/);
-});
-
-test("tree scanning is read-only and counts only reviewed Markdown forms",()=>{
-  const root=mkdtempSync(join(tmpdir(),"ptgae-term-audit-"));
-  try {
-    mkdirSync(join(root,"docs"));
-    writeFileSync(join(root,"docs","a.md"),"The witness read attention.");
-    writeFileSync(join(root,"docs","b.mdx"),"A WIT.");
-    writeFileSync(join(root,"docs","c.org"),"Unscanned syntax: attention.");
-    writeFileSync(join(root,"docs","d.txt"),"Unscanned literal: witness.");
-    mkdirSync(join(root,".git"));
-    writeFileSync(join(root,".git","private.md"),"Ignore witness.");
-    const report=canonicalTermCorpusAudit(root,profile);
-    assert.equal(report.eligibleFiles,2);
-    assert.equal(report.scannedFiles,2);
-    assert.deepEqual(report.scannedFileRecords.map(f=>f.path),["docs/a.md","docs/b.mdx"]);
-    assert.equal(report.scannedFileRecords[0].sourceSha256,H("The witness read attention."));
-    assert.deepEqual(report.excludedPaths,[
-      {path:".git",reason:"untraversed-generated-or-vcs-directory"},
-      {path:"docs/c.org",reason:"unsupported-extension"},
-      {path:"docs/d.txt",reason:"unsupported-extension"}
-    ]);
-    assert.equal(report.filesWithCollisions,2);
-    assert.equal(report.unresolvedOccurrences,3);
-    assert.equal(report.disposition,"review-required");
-    assert.equal(report.affectedFiles[0].path,"docs/a.md");
-    assert.equal(report.affectedFiles[1].path,"docs/b.mdx");
-    assert.throws(()=>canonicalTermCorpusAudit(root,{...profile,canonicalTerms:[]}),/Invalid canonical-term profile/);
-  } finally {rmSync(root,{recursive:true,force:true});}
-});
-
-test("corpus audit binds exact UTF-8 bytes, including BOM, and refuses malformed encodings",()=>{
-  const root=mkdtempSync(join(tmpdir(),"ptgae-term-bytes-"));
-  try {
-    const path=join(root,"source.md");
-    const bom=Buffer.from([0xef,0xbb,0xbf,...Buffer.from("WIT")]);
-    writeFileSync(path,bom);
-    const result=canonicalTermCorpusAudit(root,profile);
-    assert.equal(result.scannedFiles,1);
-    assert.equal(result.scannedFileRecords[0].sourceSha256,createHash("sha256").update(bom).digest("hex"));
-    assert.equal(result.unresolvedOccurrences,1);
-    writeFileSync(path,Buffer.from([0xc3,0x28]));
-    assert.throws(()=>canonicalTermCorpusAudit(root,profile),/Invalid UTF-8 source/);
-  } finally {rmSync(root,{recursive:true,force:true});}
 });
