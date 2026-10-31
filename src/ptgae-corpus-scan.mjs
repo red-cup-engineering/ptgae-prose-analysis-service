@@ -134,7 +134,11 @@ export function findRepeatedPassages(documents, { minimumWords = 20, minimumChar
       paragraph = [];
       const protectedCount = protectedRanges.reduce((n, [lo, hi]) =>
         n + Math.max(0, Math.min(hi, start + raw.length) - Math.max(lo, start)), 0);
-      if (protectedCount * 5 >= raw.length * 4) return;
+      // Do not call a passage an ordinary prose duplicate if any part
+      // is authored source evidence: metadata, quoted text, code or a link
+      // destination. An incomplete safe comparison is better than merging
+      // distinct custody because only most of a paragraph was protected.
+      if (protectedCount > 0) return;
       const normalized = raw.replace(/\s+/gu, ' ').trim();
       const words = normalized.match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
       if (normalized.length < minimumCharacters || words < minimumWords) return;
