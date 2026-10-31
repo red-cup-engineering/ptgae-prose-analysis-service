@@ -16,9 +16,9 @@ The existing [PTGAE corpus scanner](src/ptgae-corpus-scan.mjs) reports source-po
 
 From a checked-out, authorized corpus, select the original source directories explicitly:
 
-\`\`\`sh
+```sh
 node src/ptgae-corpus-scan.mjs --json --repeated-passages /path/to/operations-services-section/content /path/to/operations-services-section/services
-\`\`\`
+```
 
 The scanner follows the current PTGAE file-admission policy: recognized text extensions, skipped build/vendor directories, no symlink traversal. A reported match is only a **candidate for human examination**. Protect each source's rights, audience, temporal scope, evidence, distinct propositions, incoming references, and consumer before considering consolidation. Short repeated boilerplate and paraphrases may be missed; a negative result does not establish a duplicate-free corpus. The default thresholds (20 words and 120 characters) suppress small matches. No source files are modified, including on CLI errors.
 
