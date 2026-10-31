@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { protectedPtgaeSpans } from './analyze.mjs';
 import { lintPTGAE, summarizeFindings } from './ptgae-lint.mjs';
 
 const DEFAULT_EXTENSIONS = new Set(['.md', '.mdx', '.txt', '.html']);
@@ -109,33 +111,102 @@ export function summarizeScan(results) {
   return summary;
 }
 
+
+/** Exact repeated prose candidates, not a semantic equivalence or deletion verdict. */
+export function findRepeatedPassages(documents, { minimumWords = 20, minimumCharacters = 120, limit = 100 } = {}) {
+  if (!Array.isArray(documents)) throw new TypeError('documents must be an array');
+  if (![minimumWords, minimumCharacters, limit].every(n => Number.isSafeInteger(n) && n > 0)) {
+    throw new RangeError('thresholds and limit must be positive integers');
+  }
+  const candidates = new Map(), files = new Set();
+  for (const document of documents) {
+    const { file, source, revision = null } = document ?? {};
+    if (typeof file !== 'string' || !file || typeof source !== 'string' || files.has(file)) {
+      throw new TypeError('each document must have a unique file and source text');
+    }
+    files.add(file);
+    const protectedRanges = protectedPtgaeSpans(source);
+    const lines = source.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
+    let offset = 0, lineNumber = 1, start = 0, firstLine = 1, paragraph = [];
+    const finish = () => {
+      if (!paragraph.length) return;
+      const raw = paragraph.join('');
+      paragraph = [];
+      const protectedCount = protectedRanges.reduce((n, [lo, hi]) =>
+        n + Math.max(0, Math.min(hi, start + raw.length) - Math.max(lo, start)), 0);
+      if (protectedCount * 5 >= raw.length * 4) return;
+      const normalized = raw.replace(/\s+/gu, ' ').trim();
+      const words = normalized.match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
+      if (normalized.length < minimumCharacters || words < minimumWords) return;
+      const item = candidates.get(normalized) ?? { words, characters: normalized.length, occurrences: [] };
+      item.occurrences.push({ file, line: firstLine, revision });
+      candidates.set(normalized, item);
+    };
+    for (const line of lines) {
+      if (!line.trim() || /^ {0,3}#{1,6}\s/u.test(line)) finish();
+      else {
+        if (!paragraph.length) { start = offset; firstLine = lineNumber; }
+        paragraph.push(line);
+      }
+      offset += line.length;
+      lineNumber++;
+    }
+    finish();
+  }
+  return [...candidates.entries()]
+    .filter(([, item]) => new Set(item.occurrences.map(o => o.file)).size > 1)
+    .map(([normalized, item]) => ({
+      fingerprint: createHash('sha256').update(normalized).digest('hex'),
+      words: item.words,
+      characters: item.characters,
+      occurrences: item.occurrences.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line),
+    }))
+    .sort((a, b) => b.characters * (b.occurrences.length - 1) - a.characters * (a.occurrences.length - 1)
+      || a.fingerprint.localeCompare(b.fingerprint))
+    .slice(0, limit);
+}
+
+/** Uses the original corpus file admission; never follows symlinks or edits text. */
+export async function scanRepeatedPassages(targets, options) {
+  const paths = [];
+  for (const target of targets) await collect(target, paths);
+  const documents = [];
+  for (const file of [...new Set(paths)].sort()) documents.push({ file, source: await fs.readFile(file, 'utf8') });
+  return findRepeatedPassages(documents, options);
+}
+
 if (import.meta.url === 'file://' + process.argv[1]) {
   const args = process.argv.slice(2);
   const json = args.includes('--json');
   const failOnWarning = args.includes('--fail-on-warning');
+  const repeatAudit = args.includes('--repeated-passages');
   const literals = args
     .filter(arg => arg.startsWith('--literal='))
     .map(arg => arg.slice('--literal='.length))
     .filter(Boolean);
   const targets = args.filter(arg => !arg.startsWith('--'));
   if (!targets.length) {
-    console.error('usage: node ptgae-corpus-scan.mjs [--json] [--fail-on-warning] [--literal=TEXT] PATH [...]');
+    console.error('usage: node ptgae-corpus-scan.mjs [--json] [--fail-on-warning] [--repeated-passages] [--literal=TEXT] PATH [...]');
     process.exit(2);
   }
 
   const results = await scanPTGAE(targets);
   const summary = summarizeScan(results);
+  const repeatedPassages = repeatAudit ? await scanRepeatedPassages(targets) : [];
   const literalOccurrences = literals.length
     ? await verifyLiteralOccurrences(targets, literals)
     : [];
 
   if (json) {
-    console.log(JSON.stringify({ summary, literalOccurrences, results }, null, 2));
+    console.log(JSON.stringify({ summary, repeatedPassages, literalOccurrences, results }, null, 2));
   } else {
     for (const result of results) {
       for (const finding of result.findings) {
         console.log(result.file + ':' + finding.line + ':' + finding.column + ' ' + finding.code + ' ' + finding.severity + ' ' + finding.message);
       }
+    }
+    for (const passage of repeatedPassages) {
+      for (const occurrence of passage.occurrences) console.log(occurrence.file + ':' + occurrence.line + ' REPEATED-PASSAGE-CANDIDATE sha256=' + passage.fingerprint);
     }
     for (const occurrence of literalOccurrences) {
       console.log(occurrence.file + ':' + occurrence.line + ':' + occurrence.column + ' LITERAL ' + JSON.stringify(occurrence.literal));
