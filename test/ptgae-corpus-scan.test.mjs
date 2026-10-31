@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { scanPTGAE, summarizeScan, verifyLiteralOccurrences } from '../src/ptgae-corpus-scan.mjs';
+import { scanPTGAE, summarizeScan, verifyLiteralOccurrences, findRepeatedPassages, scanRepeatedPassages } from '../src/ptgae-corpus-scan.mjs';
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ptgae-scan-'));
 try {
@@ -43,6 +43,65 @@ try {
   assert.equal(literals.length, 2, 'exact literal verification must not inherit fuzzy search candidates');
   assert.ok(literals.every(x => path.basename(x.file) === 'literal.md'));
   assert.ok(literals.every(x => x.literal === 'may potentially'));
+
+  const passage = 'The original evidence must remain available to its actual recipient until the receiving office verifies the current source and independently accepts the exact claim with its source revision.';
+  const repeated = findRepeatedPassages([
+    { file: 'north.md', revision: 'a1', source: '# Heading\n\n' + passage + '\n\n' + passage },
+    { file: 'south.md', revision: 'b2', source: '---\ntitle: South\n---\n\n' + passage.replace('available to', 'available  to') },
+    { file: 'different.md', source: passage.replace('must remain', 'must not remain') },
+  ]);
+  assert.equal(repeated.length, 1, 'whitespace-only variants are source candidates');
+  assert.equal(repeated[0].occurrences.length, 3);
+  assert.deepEqual([...new Set(repeated[0].occurrences.map(o => o.file))], ['north.md', 'south.md']);
+  assert.deepEqual(repeated[0].occurrences.filter(o => o.file === 'north.md').map(o => o.line), [3, 5]);
+  assert.equal(repeated[0].occurrences[2].revision, 'b2');
+  assert.match(repeated[0].fingerprint, /^[0-9a-f]{64}$/u);
+
+  assert.deepEqual(findRepeatedPassages([{ file: 'one.md', source: passage + '\n\n' + passage }]), [],
+    'repetition within one file is not cross-file duplication');
+  assert.deepEqual(findRepeatedPassages([
+    { file: 'a.md', source: '~~~txt\n' + passage + '\n~~~' },
+    { file: 'b.md', source: '~~~txt\n' + passage + '\n~~~' },
+  ]), [], 'fenced source is protected from prose duplicate candidates');
+  assert.deepEqual(findRepeatedPassages([
+    { file: 'a.md', source: '---\ndescription: ' + passage + '\n---' },
+    { file: 'b.md', source: '---\ndescription: ' + passage + '\n---' },
+  ]), [], 'frontmatter is protected from prose duplication');
+  assert.deepEqual(findRepeatedPassages([
+    { file: 'a.md', source: passage },
+    { file: 'b.md', source: passage.replace('must remain', 'must not remain') },
+  ]), [], 'opposite claims must not be normalized together');
+  assert.deepEqual(findRepeatedPassages([
+    { file: 'a.md', source: passage },
+    { file: 'b.md', source: passage },
+  ], { minimumWords: 500 }), []);
+  assert.throws(() => findRepeatedPassages([{ file: 'a.md', source: passage }, { file: 'a.md', source: passage }]), TypeError);
+  assert.throws(() => findRepeatedPassages([], { limit: 0 }), RangeError);
+
+  await fs.writeFile(path.join(root, 'docs', 'repeat-a.md'), passage);
+  await fs.writeFile(path.join(root, 'docs', 'repeat-b.md'), passage);
+  const onDisk = await scanRepeatedPassages([root]);
+  assert.equal(onDisk.length, 1);
+  assert.deepEqual(onDisk[0].occurrences.map(o => path.basename(o.file)), ['repeat-a.md', 'repeat-b.md']);
+  if (symlinkCreated) assert.ok(!onDisk[0].occurrences.some(o => o.file.includes('linked-poison')));
+
+  // Protected content is not ordinary prose just because it is less than
+  // 80 percent of a long paragraph. Never emit a custody-sensitive match.
+  for (const decorated of [
+    'The witness wrote "original testimony" and ' + passage,
+    'The evidence is [held](https://example.org/record) and ' + passage,
+    'The command `preserve-source` is required and ' + passage,
+    '> The original says: ' + passage,
+  ]) {
+    assert.deepEqual(findRepeatedPassages([
+      { file: 'protected-a.md', source: decorated },
+      { file: 'protected-b.md', source: decorated },
+    ]), [], 'protected Markdown must not become a repeat candidate');
+  }
+  assert.deepEqual(findRepeatedPassages([
+    { file: 'a.md', source: '~~~text\nsource literal\n~~~\n' + passage },
+    { file: 'b.md', source: '~~~text\nsource literal\n~~~\n' + passage },
+  ]), [], 'mixed fenced and prose region must not become a candidate');
 } finally {
   await fs.rm(root, { recursive: true, force: true });
 }
