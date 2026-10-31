@@ -84,6 +84,24 @@ try {
   assert.equal(onDisk.length, 1);
   assert.deepEqual(onDisk[0].occurrences.map(o => path.basename(o.file)), ['repeat-a.md', 'repeat-b.md']);
   if (symlinkCreated) assert.ok(!onDisk[0].occurrences.some(o => o.file.includes('linked-poison')));
+
+  // Protected content is not ordinary prose just because it is less than
+  // 80 percent of a long paragraph. Never emit a custody-sensitive match.
+  for (const decorated of [
+    'The witness wrote "original testimony" and ' + passage,
+    'The evidence is [held](https://example.org/record) and ' + passage,
+    'The command `preserve-source` is required and ' + passage,
+    '> The original says: ' + passage,
+  ]) {
+    assert.deepEqual(findRepeatedPassages([
+      { file: 'protected-a.md', source: decorated },
+      { file: 'protected-b.md', source: decorated },
+    ]), [], 'protected Markdown must not become a repeat candidate');
+  }
+  assert.deepEqual(findRepeatedPassages([
+    { file: 'a.md', source: '~~~text\nsource literal\n~~~\n' + passage },
+    { file: 'b.md', source: '~~~text\nsource literal\n~~~\n' + passage },
+  ]), [], 'mixed fenced and prose region must not become a candidate');
 } finally {
   await fs.rm(root, { recursive: true, force: true });
 }
