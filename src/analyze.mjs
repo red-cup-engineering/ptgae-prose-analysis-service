@@ -48,6 +48,11 @@ export function protectedPtgaeSpans(source, {protectTables = true} = {}) {
       protect(cursor, end);
       const closing = /^ {0,3}(`+|~+)\s*$/u.exec(line);
       if (closing && closing[1][0] === fence.marker && closing[1].length >= fence.size) fence = null;
+    } else if (opening) {
+      // An unquoted fence opens a new block, not a lazy blockquote continuation.
+      inLazyQuote = false;
+      fence = { marker: opening[1][0], size: opening[1].length };
+      protect(cursor, end);
     } else if (/^ {0,3}>/u.test(line) || (inLazyQuote && line.trim())) {
       // CommonMark permits lazy continuation lines within a blockquote.
       // Those lines carry quoted evidence even without another > marker.
@@ -55,10 +60,7 @@ export function protectedPtgaeSpans(source, {protectTables = true} = {}) {
       inLazyQuote = true;
     } else {
       inLazyQuote = false;
-      if (opening) {
-        fence = { marker: opening[1][0], size: opening[1].length };
-        protect(cursor, end);
-      } else if (/^(?: {4}|\t)/u.test(line)
+      if (/^(?: {4}|\t)/u.test(line)
         || /^ {0,3}\[[^\]]+\]:\s*\S/u.test(line)) {
         protect(cursor, end);
       } else if (protectTables && line.includes('|')) {
