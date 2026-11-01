@@ -64,13 +64,15 @@ export async function reviewOperationsCorpus({
     throw new TypeError('root must be an absolute existing Git checkout');
   }
   if (![maxFiles, maxBytes, maxFileBytes, candidateLimit].every(n => Number.isSafeInteger(n) && n > 0)) {
-    throw new RangeError('limits must be positive safe integers')  const revision = gitText(repository, ['rev-parse', 'HEAD']).trim();
+    throw new RangeError('limits must be positive safe integers');
+  }
+  const repository = resolve(root);
+  const revision = gitText(repository, ['rev-parse', 'HEAD']).trim();
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(revision)) throw new Error('unqualified-git-revision');
   const objectFormat = gitText(repository, ['rev-parse', '--show-object-format']).trim();
   if (!['sha1', 'sha256'].includes(objectFormat)) throw new Error('unsupported-git-object-format');
 
-  // Select *HEAD's immutable tree*, not the mutable index. An uncommitted
-  // addition is not part of the revision reported to a downstream reader.
+  // HEAD owns the source revision; mutable staging is not admitted evidence.
   const treeEntries = gitText(repository, ['ls-tree', '-r', '-z', revision]).split('\0').filter(Boolean);
   const atRevision = new Map();
   for (const record of treeEntries) {
@@ -81,7 +83,6 @@ export async function reviewOperationsCorpus({
   }
   const selected = selectActiveOperationsProse([...atRevision.keys()]);
   if (selected.length > maxFiles) throw new RangeError('operations-corpus-file-limit-exceeded');
-'operations-corpus-file-limit-exceeded');
   const documents = [];
   let bytes = 0;
   const style = { filesWithFindings: 0, errors: 0, warnings: 0, information: 0, byCode: {} };
@@ -101,9 +102,7 @@ export async function reviewOperationsCorpus({
     if (sourceBytes.length > maxFileBytes || bytes + sourceBytes.length > maxBytes) {
       throw new RangeError('operations-corpus-byte-limit-exceeded');
     }
-    // Git's canonical blob identity binds the actual bytes observed to HEAD.
-    // This refuses unstaged, staged or race-time edits instead of mislabeling
-    // worktree text as immutable source from the current commit.
+    // Prove exact Git blob identity before attributing the bytes to HEAD.
     const receivedOid = createHash(objectFormat)
       .update('blob ' + sourceBytes.length + '\0').update(sourceBytes).digest('hex');
     if (receivedOid !== entry.oid) {
