@@ -89,6 +89,8 @@ try {
   // 80 percent of a long paragraph. Never emit a custody-sensitive match.
   for (const decorated of [
     'The witness wrote "original testimony" and ' + passage,
+    'The witness wrote ‘original testimony’ and ' + passage,
+    '> The witness supplied:\n' + passage,
     'The evidence is [held](https://example.org/record) and ' + passage,
     'The command `preserve-source` is required and ' + passage,
     '> The original says: ' + passage,
