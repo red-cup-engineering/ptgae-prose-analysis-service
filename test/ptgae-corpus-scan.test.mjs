@@ -94,6 +94,16 @@ try {
   assert.throws(() => findRepeatedPassages([], { unit: 'word' }), TypeError);
   assert.throws(() => findRepeatedPassages([], { includeWithinFile: 'yes' }), TypeError);
 
+  const unquotedSentence = 'The current operations reader shall preserve the exact original Work and read the independent recipient acceptance before any obsolete prose is retired.';
+  const afterQuote = findRepeatedPassages([
+    { file: 'operations.md', source: '> Quoted source testimony.\n# Current rule\n' + unquotedSentence },
+    { file: 'editor.md', source: '## Current editorial instruction\n' + unquotedSentence },
+  ], { unit: 'sentence', minimumWords: 16, minimumCharacters: 100 });
+  assert.equal(afterQuote.length, 1,
+    'a genuine repeated sentence after a quote-ending heading must remain discoverable');
+  assert.deepEqual(afterQuote[0].occurrences.map(o => [o.file, o.line]),
+    [['editor.md', 2], ['operations.md', 3]]);
+
   assert.deepEqual(findRepeatedPassages([{ file: 'one.md', source: passage + '\n\n' + passage }]), [],
     'repetition within one file is not cross-file duplication');
   assert.deepEqual(findRepeatedPassages([
