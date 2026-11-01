@@ -30,9 +30,9 @@ test('selects original active prose, not legacy/custody/fixture mirrors', () => 
     'services/reader.md/../../../etc/passwd.md',
     'services/link.md', 'src/program.mjs',
   ]), [
-    'README.md',
     'content/terms/example.md',
     'lib/agency/skills/alpha/SKILL.md',
+    'README.md',
     'services/link.md',
     'services/research/README.md',
   ]);
