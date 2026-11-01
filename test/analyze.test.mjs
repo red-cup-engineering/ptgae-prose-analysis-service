@@ -32,6 +32,17 @@ test('lazy blockquote continuation and curly single quoted evidence remain prote
     'ordinary apostrophes must not hide editable prose');
 });
 
+test('headings, lists, thematic breaks and empty quote lines end lazy quotation scope', () => {
+  for (const boundary of ['# New method', '- A new task', '---', '>']) {
+    const source = ['> Going forward was stated by the witness.', boundary, 'Going forward, revise this live method.'].join('\n');
+    const findings = rule(source, 'PTG032');
+    assert.deepEqual(findings.map(f => f.line), [3], 'new prose must not inherit quote protection after ' + boundary);
+  }
+  const lazy = ['> The testimony begins:', 'Going forward, the witness continues.', '', 'Going forward, edit the operative rule.'].join('\n');
+  assert.deepEqual(rule(lazy, 'PTG032').map(f => f.line), [4],
+    'paragraph-like lazy quotation must remain protected');
+});
+
 test('fence termination must agree in marker type and length',()=>{
   const source=['~~~~js','In order to do A','~~~','In order to do B','~~~~','In order to do C'].join('\n');
   assert.equal(rule(source,'PTG004').length,1);
