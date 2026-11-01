@@ -56,9 +56,9 @@ export function protectedPtgaeSpans(source, {protectTables = true} = {}) {
     } else if (/^ {0,3}>/u.test(line)) {
       protect(cursor, end);
       // An empty quoted line does not license a following lazy paragraph.
-      inLazyQuote = /^ {0,3}>[ \\t]?\\S/u.test(line);
+      inLazyQuote = /^ {0,3}>[ \t]?\S/u.test(line);
     } else if (inLazyQuote && line.trim()
-      && !/^(?: {4}|\\t| {0,3}(?:#{1,6}(?:\\s|$)|(?:[-+*]|\\d{1,9}[.)])\\s+|(?:[-*_]\\s*){3,}$|\\[[^\\]]+\\]:\\s*\\S|<[/!]|\\|))/u.test(line)) {
+      && !/^(?: {4}|\t| {0,3}(?:#{1,6}(?:\s|$)|(?:[-+*]|\d{1,9}[.)])\s+|(?:[-*_]\s*){3,}$|\[[^\]]+\]:\s*\S|<[/!]|\|))/u.test(line)) {
       // Only paragraph-like lines can lazily continue quoted testimony.
       // Headings, lists, thematic breaks, link definitions, HTML and tables interrupt it.
       protect(cursor, end);
