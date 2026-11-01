@@ -113,10 +113,13 @@ export function summarizeScan(results) {
 
 
 /** Exact repeated prose candidates, not a semantic equivalence or deletion verdict. */
-export function findRepeatedPassages(documents, { minimumWords = 20, minimumCharacters = 120, limit = 100 } = {}) {
+export function findRepeatedPassages(documents, { minimumWords = 20, minimumCharacters = 120, limit = 100, unit = 'paragraph', includeWithinFile = false } = {}) {
   if (!Array.isArray(documents)) throw new TypeError('documents must be an array');
   if (![minimumWords, minimumCharacters, limit].every(n => Number.isSafeInteger(n) && n > 0)) {
     throw new RangeError('thresholds and limit must be positive integers');
+  }
+  if (!['paragraph', 'sentence'].includes(unit) || typeof includeWithinFile !== 'boolean') {
+    throw new TypeError('unit must be paragraph or sentence, and includeWithinFile must be boolean');
   }
   const candidates = new Map(), files = new Set();
   for (const document of documents) {
@@ -139,12 +142,25 @@ export function findRepeatedPassages(documents, { minimumWords = 20, minimumChar
       // destination. An incomplete safe comparison is better than merging
       // distinct custody because only most of a paragraph was protected.
       if (protectedCount > 0) return;
-      const normalized = raw.replace(/\s+/gu, ' ').trim();
-      const words = normalized.match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
-      if (normalized.length < minimumCharacters || words < minimumWords) return;
-      const item = candidates.get(normalized) ?? { words, characters: normalized.length, occurrences: [] };
-      item.occurrences.push({ file, line: firstLine, revision });
-      candidates.set(normalized, item);
+      // Sentence review uses the same protected paragraph boundary and source
+      // coordinates as exact-passage review. Split only at terminal punctuation
+      // followed by whitespace/end; these are candidates, not semantic claims.
+      const units = unit === 'sentence'
+        ? [...raw.matchAll(/[^\s.!?][^.!?]*(?:[.!?]+(?=\s|$)|$)/gu)]
+        : [{ 0: raw, index: 0 }];
+      for (const part of units) {
+        const original = part[0];
+        // Bare network references are not ordinary prose, and punctuation
+        // inside them is not a reliable sentence boundary.
+        if (unit === 'sentence' && /(?:https?:\/\/|www\.)/iu.test(original)) continue;
+        const normalized = original.replace(/\s+/gu, ' ').trim();
+        const words = normalized.match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
+        if (normalized.length < minimumCharacters || words < minimumWords) continue;
+        const item = candidates.get(normalized) ?? { words, characters: normalized.length, occurrences: [] };
+        const at = unit === 'sentence' ? sourceLocation(source, start + part.index) : { line: firstLine };
+        item.occurrences.push({ file, line: at.line, ...(unit === 'sentence' ? { column: at.column } : {}), revision });
+        candidates.set(normalized, item);
+      }
     };
     for (const line of lines) {
       if (!line.trim() || /^ {0,3}#{1,6}\s/u.test(line)) finish();
@@ -158,8 +174,9 @@ export function findRepeatedPassages(documents, { minimumWords = 20, minimumChar
     finish();
   }
   return [...candidates.entries()]
-    .filter(([, item]) => new Set(item.occurrences.map(o => o.file)).size > 1)
+    .filter(([, item]) => item.occurrences.length > 1 && (includeWithinFile || new Set(item.occurrences.map(o => o.file)).size > 1))
     .map(([normalized, item]) => ({
+      ...(unit === 'sentence' ? { unit } : {}),
       fingerprint: createHash('sha256').update(normalized).digest('hex'),
       words: item.words,
       characters: item.characters,
@@ -183,26 +200,35 @@ if (import.meta.url === 'file://' + process.argv[1]) {
   const args = process.argv.slice(2);
   const json = args.includes('--json');
   const failOnWarning = args.includes('--fail-on-warning');
+  const sentenceAudit = args.includes('--repeated-sentences');
+  const includeWithinFile = args.includes('--within-file');
   const repeatAudit = args.includes('--repeated-passages');
+  if (includeWithinFile && !sentenceAudit) {
+    console.error('--within-file requires --repeated-sentences');
+    process.exit(2);
+  }
   const literals = args
     .filter(arg => arg.startsWith('--literal='))
     .map(arg => arg.slice('--literal='.length))
     .filter(Boolean);
   const targets = args.filter(arg => !arg.startsWith('--'));
   if (!targets.length) {
-    console.error('usage: node ptgae-corpus-scan.mjs [--json] [--fail-on-warning] [--repeated-passages] [--literal=TEXT] PATH [...]');
+    console.error('usage: node ptgae-corpus-scan.mjs [--json] [--fail-on-warning] [--repeated-passages] [--repeated-sentences] [--within-file] [--literal=TEXT] PATH [...]');
     process.exit(2);
   }
 
   const results = await scanPTGAE(targets);
   const summary = summarizeScan(results);
   const repeatedPassages = repeatAudit ? await scanRepeatedPassages(targets) : [];
+  const repeatedSentences = sentenceAudit ? await scanRepeatedPassages(targets, {
+    unit: 'sentence', minimumWords: 16, minimumCharacters: 100, includeWithinFile,
+  }) : [];
   const literalOccurrences = literals.length
     ? await verifyLiteralOccurrences(targets, literals)
     : [];
 
   if (json) {
-    console.log(JSON.stringify({ summary, repeatedPassages, literalOccurrences, results }, null, 2));
+    console.log(JSON.stringify({ summary, repeatedPassages, repeatedSentences, literalOccurrences, results }, null, 2));
   } else {
     for (const result of results) {
       for (const finding of result.findings) {
@@ -211,6 +237,9 @@ if (import.meta.url === 'file://' + process.argv[1]) {
     }
     for (const passage of repeatedPassages) {
       for (const occurrence of passage.occurrences) console.log(occurrence.file + ':' + occurrence.line + ' REPEATED-PASSAGE-CANDIDATE sha256=' + passage.fingerprint);
+    }
+    for (const sentence of repeatedSentences) {
+      for (const occurrence of sentence.occurrences) console.log(occurrence.file + ':' + occurrence.line + ':' + occurrence.column + ' REPEATED-SENTENCE-CANDIDATE sha256=' + sentence.fingerprint);
     }
     for (const occurrence of literalOccurrences) {
       console.log(occurrence.file + ':' + occurrence.line + ':' + occurrence.column + ' LITERAL ' + JSON.stringify(occurrence.literal));

@@ -57,6 +57,43 @@ try {
   assert.equal(repeated[0].occurrences[2].revision, 'b2');
   assert.match(repeated[0].fingerprint, /^[0-9a-f]{64}$/u);
 
+  // The same original parser can surface exact repeated long sentences even
+  // when paragraphs have different, separately valuable surrounding claims.
+  const sharedSentence = 'The receiving officer must compare the exact original source revision against the actual installed consumer and independently read the beneficiary result before closing the existing Work.';
+  const sentences = findRepeatedPassages([
+    { file: 'alpha.md', revision: 'a1', source: 'A different introduction comes first. ' + sharedSentence + '\n\nUnique conclusion follows.' },
+    { file: 'beta.md', revision: 'b2', source: 'This paragraph has its own introductory context.\n' + sharedSentence + ' Another independent observation follows.' },
+    { file: 'gamma.md', revision: 'c3', source: sharedSentence.replace('must compare', 'must not compare') },
+  ], { unit: 'sentence', minimumWords: 16, minimumCharacters: 100 });
+  assert.equal(sentences.length, 1);
+  assert.equal(sentences[0].unit, 'sentence');
+  assert.deepEqual(sentences[0].occurrences.map(o => [o.file, o.line]), [['alpha.md', 1], ['beta.md', 2]]);
+  assert.equal(sentences[0].occurrences[0].revision, 'a1');
+  assert.ok(sentences[0].occurrences[0].column > 1);
+  assert.match(sentences[0].fingerprint, /^[0-9a-f]{64}$/u);
+
+  assert.deepEqual(findRepeatedPassages([{ file: 'within.md', source: sharedSentence + '\n\n' + sharedSentence }],
+    { unit: 'sentence', minimumWords: 16, minimumCharacters: 100 }), []);
+  const within = findRepeatedPassages([{ file: 'within.md', source: sharedSentence + '\n\n' + sharedSentence }],
+    { unit: 'sentence', minimumWords: 16, minimumCharacters: 100, includeWithinFile: true });
+  assert.equal(within.length, 1);
+  assert.deepEqual(within[0].occurrences.map(o => o.line), [1, 3]);
+
+  assert.deepEqual(findRepeatedPassages([
+    { file: 'quoted-a.md', source: '> ' + sharedSentence },
+    { file: 'quoted-b.md', source: '> ' + sharedSentence },
+  ], { unit: 'sentence', minimumWords: 16, minimumCharacters: 100 }), []);
+  assert.deepEqual(findRepeatedPassages([
+    { file: 'meta-a.md', source: '---\ndescription: ' + sharedSentence + '\n---' },
+    { file: 'meta-b.md', source: '---\ndescription: ' + sharedSentence + '\n---' },
+  ], { unit: 'sentence', minimumWords: 16, minimumCharacters: 100 }), []);
+  assert.deepEqual(findRepeatedPassages([
+    { file: 'link-a.md', source: '[Evidence](https://example.org/item) and ' + sharedSentence },
+    { file: 'link-b.md', source: '[Evidence](https://example.org/item) and ' + sharedSentence },
+  ], { unit: 'sentence', minimumWords: 16, minimumCharacters: 100 }), []);
+  assert.throws(() => findRepeatedPassages([], { unit: 'word' }), TypeError);
+  assert.throws(() => findRepeatedPassages([], { includeWithinFile: 'yes' }), TypeError);
+
   assert.deepEqual(findRepeatedPassages([{ file: 'one.md', source: passage + '\n\n' + passage }]), [],
     'repetition within one file is not cross-file duplication');
   assert.deepEqual(findRepeatedPassages([
