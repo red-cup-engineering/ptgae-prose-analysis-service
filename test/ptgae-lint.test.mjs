@@ -102,6 +102,12 @@ assert.equal(postQuote[0].code, 'PTG032');
 assert.equal(lintPTGAE("The team's editor works in order to clarify prose.").length, 1,
   'ordinary apostrophes do not hide editorial prose');
 
+const interruptedQuote = lintPTGAE('> Going forward was in the testimony.\n# A new method\nGoing forward, fix the operative instruction.');
+assert.deepEqual(interruptedQuote.filter(f => f.code === 'PTG032').map(f => f.line), [3],
+  'the shared source-protection reader must expose editorial prose after a heading');
+const listAfterQuote = lintPTGAE('> Going forward was quoted.\n- New work item\nGoing forward, revise the live method.');
+assert.deepEqual(listAfterQuote.filter(f => f.code === 'PTG032').map(f => f.line), [3]);
+
 const quotedMixed = lintPTGAE('The change may potentially matter; the source says "it may potentially matter."');
 assert.equal(quotedMixed.length, 1);
 assert.equal(quotedMixed[0].code, 'PTG002');
