@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -63,28 +64,56 @@ export async function reviewOperationsCorpus({
     throw new TypeError('root must be an absolute existing Git checkout');
   }
   if (![maxFiles, maxBytes, maxFileBytes, candidateLimit].every(n => Number.isSafeInteger(n) && n > 0)) {
-    throw new RangeError('limits must be positive safe integers');
+    throw new RangeError('limits must be positive safe integers')  const revision = gitText(repository, ['rev-parse', 'HEAD']).trim();
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(revision)) throw new Error('unqualified-git-revision');
+  const objectFormat = gitText(repository, ['rev-parse', '--show-object-format']).trim();
+  if (!['sha1', 'sha256'].includes(objectFormat)) throw new Error('unsupported-git-object-format');
+
+  // Select *HEAD's immutable tree*, not the mutable index. An uncommitted
+  // addition is not part of the revision reported to a downstream reader.
+  const treeEntries = gitText(repository, ['ls-tree', '-r', '-z', revision]).split('\0').filter(Boolean);
+  const atRevision = new Map();
+  for (const record of treeEntries) {
+    const match = /^(100644|100755|120000|160000) (blob|commit) ([a-f0-9]{40}|[a-f0-9]{64})\t([\s\S]+)$/u.exec(record);
+    if (!match) throw new Error('operations-corpus-invalid-git-tree-entry');
+    const [, mode, kind, oid, relative] = match;
+    atRevision.set(relative, { mode, kind, oid });
   }
-  const repository = resolve(root);
-  const revision = gitText(repository, ['rev-parse', 'HEAD']).trim();
-  if (!/^[a-f0-9]{40}$/u.test(revision)) throw new Error('unqualified-git-revision');
-  const tracked = gitText(repository, ['ls-files', '-z']).split('\0').filter(Boolean);
-  const selected = selectActiveOperationsProse(tracked);
+  const selected = selectActiveOperationsProse([...atRevision.keys()]);
   if (selected.length > maxFiles) throw new RangeError('operations-corpus-file-limit-exceeded');
+'operations-corpus-file-limit-exceeded');
   const documents = [];
   let bytes = 0;
   const style = { filesWithFindings: 0, errors: 0, warnings: 0, information: 0, byCode: {} };
   for (const relative of selected) {
     const absolute = join(repository, ...relative.split('/'));
     if (!absolute.startsWith(repository + sep)) throw new Error('operations-corpus-path-outside-root');
+    const entry = atRevision.get(relative);
+    if (!entry || entry.kind !== 'blob' || !['100644', '100755'].includes(entry.mode)) {
+      throw new Error('operations-corpus-nonregular-tracked-source: ' + relative);
+    }
     const stat = await lstat(absolute);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('operations-corpus-nonregular-tracked-source: ' + relative);
     if (stat.size > maxFileBytes || bytes + stat.size > maxBytes) {
       throw new RangeError('operations-corpus-byte-limit-exceeded');
     }
-    const source = await readFile(absolute, 'utf8');
-    bytes += Buffer.byteLength(source, 'utf8');
-    if (bytes > maxBytes) throw new RangeError('operations-corpus-byte-limit-exceeded');
+    const sourceBytes = await readFile(absolute);
+    if (sourceBytes.length > maxFileBytes || bytes + sourceBytes.length > maxBytes) {
+      throw new RangeError('operations-corpus-byte-limit-exceeded');
+    }
+    // Git's canonical blob identity binds the actual bytes observed to HEAD.
+    // This refuses unstaged, staged or race-time edits instead of mislabeling
+    // worktree text as immutable source from the current commit.
+    const receivedOid = createHash(objectFormat)
+      .update('blob ' + sourceBytes.length + '\0').update(sourceBytes).digest('hex');
+    if (receivedOid !== entry.oid) {
+      throw new Error('operations-corpus-source-revision-mismatch: ' + relative);
+    }
+    const source = sourceBytes.toString('utf8');
+    if (!Buffer.from(source, 'utf8').equals(sourceBytes)) {
+      throw new Error('operations-corpus-source-invalid-utf8: ' + relative);
+    }
+    bytes += sourceBytes.length;
     documents.push({ file: relative, source, revision });
     const result = summarizeFindings(lintPTGAE(source));
     if (result.total) style.filesWithFindings++;
