@@ -1,0 +1,49 @@
+name: Read-only Operations corpus review
+
+on:
+  workflow_call:
+    inputs:
+      supplier_ref:
+        description: Exact qualified Git commit of the source-owning PTGAE supplier
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/checkout@v4
+        with:
+          repository: red-cup-engineering/ptgae-prose-analysis-service
+          ref: ${{ inputs.supplier_ref }}
+          path: .ptgae-supplier
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read tracked active prose with the original PTGAE scanner
+        run: node .ptgae-supplier/src/review-operations-corpus.mjs "${{ github.workspace }}" > "${{ runner.temp }}/operations-corpus.json"
+      - name: Read back bounded source-candidate receipts
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const report = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            const result = {
+              type: report.type, sourceRevision: report.sourceRevision,
+              files: report.files, bytes: report.bytes,
+              style: report.style,
+              repeatedParagraphCandidates: report.repetition.repeatedParagraphCandidates,
+              repeatedSentenceCandidates: report.repetition.repeatedSentenceCandidates,
+              bounded: report.repetition.bounded,
+              firstCandidates: report.repetition.sentences.slice(0, 12),
+              claimsOfAuthority: report.claimsOfAuthority,
+            };
+            console.log(JSON.stringify(result, null, 2));
+          ' "${{ runner.temp }}/operations-corpus.json"

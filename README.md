@@ -34,4 +34,16 @@ For an actual edit, use Operations' original [consolidate-concept-notes](https:/
 
 Both prose linting and repeated-passage diagnostics use the original source-coordinate protection law in `src/analyze.mjs`. YAML frontmatter, fenced/inline code, Markdown link destinations, tables, explicit and lazy blockquotes, and straight/curly quotations remain source evidence rather than edit suggestions. The scanner still identifies only candidate repetition; its diagnostics grant no permission to rewrite, redirect or retire a document. Tests cover both excluded evidence and ordinary prose after a quotation.
 
+## Operations corpus receiving
+
+The [source-owned read-only corpus consumer](src/review-operations-corpus.mjs) uses the **same PTGAE parser and repeat analysis** with a Git-tracked view of current operating prose. It reads the original `README.md`, `lib/agency/skills/`, `content/` and `services/` Markdown/text/HTML, explicitly excluding `legacy`, `history`, `recovered`, `source-history`, fixtures, generated and private-carrier regions. Source selection is deterministic and bounded by file/byte limits; symlinks and unreadable/non-regular tracked documents refuse rather than silently changing coverage.
+
+```sh
+node src/review-operations-corpus.mjs /absolute/path/to/operations-services-section
+```
+
+Its JSON includes the actual checkout revision, inspected file/byte count, conservative PTGAE code counts, and exact repeated paragraph or sentence **candidate fingerprints with original paths/line coordinates**. It prints **no source paragraphs or customer records**, merges or deletes nothing, and cannot determine semantic equivalence. It deliberately excludes historic witnesses from the active-edit census; they remain under their actual archival owners. Before rewriting, review the source and current consumers under Coesite's original concept-note consolidation rule.
+
+The [reusable CI reader](.github/workflows/review-operations-corpus.yml) allows an authorized consumer to call this report with an **immutable supplier commit**. The caller repository stays the source owner; it does not install a new language engine, invent an L-Space admission or grant deletion authority. GitHub source, runner execution, downstream package selection and independent editorial acceptance remain separate readings.
+
 A repository source commit does not establish an installed CLI, PTGAE corpus approval, or downstream reader receiving.
