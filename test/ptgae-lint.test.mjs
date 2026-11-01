@@ -77,7 +77,7 @@ const clean = [
   'The source says "it is important to note that this example is intentionally bad."',
   'The source says “the change may potentially affect the parser.”',
   '> Source states:\nThe change may potentially matter.',
-  '   > Source states:\nThe change could possibly matter.\n>\nAnother quoted paragraph might perhaps matter.',
+  '   > Source states:\nThe change could possibly matter.\n>\n> Another quoted paragraph might perhaps matter.',
   '🔬 Source evidence:\n> Source states:\nThe change may potentially matter.'
 ];
 
@@ -107,6 +107,11 @@ assert.deepEqual(interruptedQuote.filter(f => f.code === 'PTG032').map(f => f.li
   'the shared source-protection reader must expose editorial prose after a heading');
 const listAfterQuote = lintPTGAE('> Going forward was quoted.\n- New work item\nGoing forward, revise the live method.');
 assert.deepEqual(listAfterQuote.filter(f => f.code === 'PTG032').map(f => f.line), [3]);
+
+// After a blank quote marker, unmarked prose is a new ordinary paragraph.
+// This is not a lazy continuation of source testimony under CommonMark.
+const detachedAfterEmptyQuote = lintPTGAE('> Source testimony.\n>\nGoing forward, the editor must revise this method.');
+assert.deepEqual(detachedAfterEmptyQuote.filter(f => f.code === 'PTG032').map(f => f.line), [3]);
 
 const quotedMixed = lintPTGAE('The change may potentially matter; the source says "it may potentially matter."');
 assert.equal(quotedMixed.length, 1);
