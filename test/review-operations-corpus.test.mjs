@@ -72,6 +72,29 @@ test('produces source-bound private-text-free repetition candidates from a real 
   assert.ok(!serialized.includes(shared), 'the output must not expose source or protected testimony');
   assert.ok(!serialized.includes('lib/legacy'));
   assert.ok(!serialized.includes('source-history'));
+  // HEAD is the evidence identity; an unstaged or staged worktree change must
+  // never be reported under the prior Git revision.
+  await put(root, 'README.md', '# Operations\n\nAn uncommitted proposal is not the admitted source.\n');
+  await assert.rejects(reviewOperationsCorpus({ root }), /operations-corpus-source-revision-mismatch: README\.md/u);
+  git(root, 'add', 'README.md');
+  await assert.rejects(reviewOperationsCorpus({ root }), /operations-corpus-source-revision-mismatch: README\.md/u);
+
+  // Even when the index is staged differently, the exact HEAD worktree bytes
+  // are admissible: no stale index or mutating local state defines the source.
+  await put(root, 'README.md', '# Operations\n\nThe original references belong to their owner.\n');
+  const restored = await reviewOperationsCorpus({ root });
+  assert.equal(restored.sourceRevision, result.sourceRevision);
+  assert.equal(restored.files, result.files);
+  assert.deepEqual(restored.repetition, result.repetition);
+
+  // A new staged document is not in the reported HEAD tree at all.
+  await put(root, 'services/research/staged-only.md', shared + '\n');
+  git(root, 'add', 'services/research/staged-only.md');
+  const onlyHead = await reviewOperationsCorpus({ root });
+  assert.equal(onlyHead.files, result.files);
+  assert.equal(onlyHead.bytes, result.bytes);
+  assert.equal(onlyHead.sourceRevision, result.sourceRevision);
+
   await assert.rejects(reviewOperationsCorpus({ root, maxFiles: 2 }), /file-limit-exceeded/u);
   await assert.rejects(reviewOperationsCorpus({ root, maxBytes: 100 }), /byte-limit-exceeded/u);
   await assert.rejects(reviewOperationsCorpus({ root: '.' }), /absolute existing Git checkout/u);
