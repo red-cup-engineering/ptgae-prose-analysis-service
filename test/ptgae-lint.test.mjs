@@ -85,6 +85,23 @@ for (const source of clean) {
   assert.deepEqual(lintPTGAE(source), [], `clean fixture was flagged: ${source}`);
 }
 
+// A reviewer must not edit documented source evidence as ordinary prose.
+for (const preserved of [
+  '---\ndescription: Going forward, the edition says in order to do this.\n---\nThe parser preserves provenance.',
+  '[Release](https://example.org/going-forward/in-order-to) is a supported destination.',
+  'The witness stated ‘Going forward in order to preserve the source.’',
+  '> The testimony says:\nGoing forward, use the source as received.',
+  '~~~~md\nGoing forward, preserve the code.\n~~~\nIn order to preserve the code.\n~~~~',
+]) {
+  assert.deepEqual(lintPTGAE(preserved), [], 'quoted, linked, metadata and fenced evidence are protected');
+}
+const postQuote = lintPTGAE('> The testimony says:\nGoing forward, use the old source.\n\nGoing forward, edit the live prose.');
+assert.equal(postQuote.length, 1);
+assert.equal(postQuote[0].line, 4);
+assert.equal(postQuote[0].code, 'PTG032');
+assert.equal(lintPTGAE("The team's editor works in order to clarify prose.").length, 1,
+  'ordinary apostrophes do not hide editorial prose');
+
 const quotedMixed = lintPTGAE('The change may potentially matter; the source says "it may potentially matter."');
 assert.equal(quotedMixed.length, 1);
 assert.equal(quotedMixed[0].code, 'PTG002');

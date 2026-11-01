@@ -21,6 +21,17 @@ test('YAML frontmatter, quotes, blockquotes and fenced code are protected', () =
   assert.equal(rule(source,'PTG004')[0].line,10);
 });
 
+test('lazy blockquote continuation and curly single quoted evidence remain protected', () => {
+  const lazy = ['> The witness stated:', 'In order to protect this quotation.', '', 'In order to edit the operative prose.'].join('\n');
+  assert.equal(rule(lazy, 'PTG004').length, 1);
+  assert.equal(rule(lazy, 'PTG004')[0].line, 4);
+  const single = 'The witness stated ‘Going forward and in order to protect evidence’ but going forward we check the source.';
+  assert.equal(rule(single, 'PTG004').length, 0);
+  assert.equal(rule(single, 'PTG032').length, 1);
+  assert.equal(rule("The team's editor works in order to clarify prose.", 'PTG004').length, 1,
+    'ordinary apostrophes must not hide editable prose');
+});
+
 test('fence termination must agree in marker type and length',()=>{
   const source=['~~~~js','In order to do A','~~~','In order to do B','~~~~','In order to do C'].join('\n');
   assert.equal(rule(source,'PTG004').length,1);

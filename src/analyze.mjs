@@ -34,6 +34,7 @@ export function protectedPtgaeSpans(source, {protectTables = true} = {}) {
   let lineNo = 0;
   let inFrontmatter = false;
   let fence = null;
+  let inLazyQuote = false;
   while (cursor < source.length) {
     const newLine = source.indexOf('\n', cursor);
     const end = newLine < 0 ? source.length : newLine;
@@ -48,14 +49,24 @@ export function protectedPtgaeSpans(source, {protectTables = true} = {}) {
       const closing = /^ {0,3}(`+|~+)\s*$/u.exec(line);
       if (closing && closing[1][0] === fence.marker && closing[1].length >= fence.size) fence = null;
     } else if (opening) {
+      // An unquoted fence opens a new block, not a lazy blockquote continuation.
+      inLazyQuote = false;
       fence = { marker: opening[1][0], size: opening[1].length };
       protect(cursor, end);
-    } else if (/^ {0,3}>/u.test(line) || /^(?: {4}|\t)/u.test(line)
-      || /^ {0,3}\[[^\]]+\]:\s*\S/u.test(line)) {
+    } else if (/^ {0,3}>/u.test(line) || (inLazyQuote && line.trim())) {
+      // CommonMark permits lazy continuation lines within a blockquote.
+      // Those lines carry quoted evidence even without another > marker.
       protect(cursor, end);
-    } else if (protectTables && line.includes('|')) {
-      // A conservative text lint, not a Markdown parser: table cells are protected.
-      protect(cursor, end);
+      inLazyQuote = true;
+    } else {
+      inLazyQuote = false;
+      if (/^(?: {4}|\t)/u.test(line)
+        || /^ {0,3}\[[^\]]+\]:\s*\S/u.test(line)) {
+        protect(cursor, end);
+      } else if (protectTables && line.includes('|')) {
+        // A conservative text lint, not a Markdown parser: table cells are protected.
+        protect(cursor, end);
+      }
     }
     cursor = newLine < 0 ? source.length : newLine + 1;
     lineNo++;
@@ -83,8 +94,9 @@ export function protectedPtgaeSpans(source, {protectTables = true} = {}) {
       }
       if (closing !== -1) { protect(i, closing); i = closing-1; }
       else { protect(i, source.length); break; }
-    } else if (source[i] === '"' || source[i] === '“') {
-      const closing = findClosingQuote(i, source[i] === '“' ? '”' : '"');
+    } else if (source[i] === '"' || source[i] === '“' || source[i] === '‘') {
+      // Curly single quotation marks carry evidence; apostrophes inside words do not.
+      const closing = findClosingQuote(i, source[i] === '“' ? '”' : source[i] === '‘' ? '’' : '"');
       if (closing !== -1) { protect(i, closing+1); i = closing; }
       else { const eol = source.indexOf('\n', i); const end = eol < 0 ? source.length : eol; protect(i, end); i = end-1; }
     } else if (source[i] === ']' && source[i+1] === '(') {

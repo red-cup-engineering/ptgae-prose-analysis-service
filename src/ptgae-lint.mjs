@@ -1,3 +1,5 @@
+import { protectedPtgaeSpans } from './analyze.mjs';
+
 const RULES = [
   { code: 'PTG001', severity: 'warning', pattern: /\b(?:it is important to note(?: that)?|it is worth noting(?: that)?|it should be noted that|it is worth mentioning(?: that)?|it is important to remember(?: that)?)\b/gi, message: 'Delete the throat-clearing phrase and state the proposition.' },
   { code: 'PTG002', severity: 'warning', pattern: /\b(?:may|might|could)\s+(?:potentially|possibly|perhaps)\b/gi, message: 'Use one uncertainty marker, not stacked modality.' },
@@ -50,67 +52,13 @@ export const CLAIM_STATUS = new Set([
   'Deprecated', 'Unknown'
 ]);
 
-function findStraightQuoteEnd(source, start) {
-  for (let i = start + 1; i < source.length; i++) {
-    if (source[i] === '"' && source[i - 1] !== '\\') return i;
-    if (source[i] === '\n') return -1;
-  }
-  return -1;
-}
-
+// The source-coordinate protection law is shared with analysis and corpus scanning.
+// Do not maintain a second, weaker Markdown masker for prose linting.
 function maskMarkdownCode(source) {
-  // Keep indices in UTF-16 code units, matching slice/indexOf and regex offsets.
-  const chars = source.split('');
-  const masked = source.split('');
-  let inFence = false;
-  let fence = null;
-  let inInline = false;
-  let inBlockquote = false;
-  for (let i = 0; i < chars.length; i++) {
-    if (!inFence && !inInline && (i === 0 || chars[i - 1] === '\n')) {
-      const nextNewline = source.indexOf('\n', i);
-      const lineEnd = nextNewline === -1 ? source.length : nextNewline;
-      const line = source.slice(i, lineEnd);
-      // Preserve lazy quote continuations along with explicitly marked lines.
-      if (/^\s{0,3}>/.test(line) || (inBlockquote && line.trim())) {
-        inBlockquote = true;
-        for (let j = i; j < lineEnd; j++) masked[j] = ' ';
-        i = lineEnd - 1;
-        continue;
-      }
-      inBlockquote = false;
-    }
-    if (!inInline && (source.startsWith('```', i) || source.startsWith('~~~', i))) {
-      const mark = source.slice(i, i + 3);
-      if (!inFence) { inFence = true; fence = mark; }
-      else if (mark === fence) { inFence = false; fence = null; }
-      for (let j = 0; j < 3; j++) masked[i + j] = ' ';
-      i += 2;
-      continue;
-    }
-    if (!inFence && chars[i] === String.fromCharCode(96)) {
-      inInline = !inInline;
-      masked[i] = ' ';
-      continue;
-    }
-    if (!inFence && !inInline && chars[i] === '"') {
-      const end = findStraightQuoteEnd(source, i);
-      if (end !== -1) {
-        for (let j = i; j <= end; j++) if (chars[j] !== '\n') masked[j] = ' ';
-        i = end;
-        continue;
-      }
-    }
-    if (!inFence && !inInline && chars[i] === '“') {
-      const end = source.indexOf('”', i + 1);
-      if (end !== -1 && !source.slice(i, end + 1).includes('\n')) {
-        for (let j = i; j <= end; j++) if (chars[j] !== '\n') masked[j] = ' ';
-        i = end;
-        continue;
-      }
-    }
-    if (inFence || inInline) {
-      if (chars[i] !== '\n') masked[i] = ' ';
+  const masked = source.split(''); // UTF-16 code units, unchanged source offsets
+  for (const [start, end] of protectedPtgaeSpans(source)) {
+    for (let i = start; i < end; i++) {
+      if (masked[i] !== '\n' && masked[i] !== '\r') masked[i] = ' ';
     }
   }
   return masked.join('');
