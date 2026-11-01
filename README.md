@@ -24,4 +24,6 @@ The scanner follows the current PTGAE file-admission policy: recognized text ext
 
 For an actual edit, use Operations' original [consolidate-concept-notes](https://github.com/coesite-operations/operations-services-section/blob/main/lib/agency/skills/consolidate-concept-notes/SKILL.md) method and Red Cup's [Markdown engineering](https://github.com/red-cup-engineering/markdown-engineering-services-section) source/graph readers. Its outstanding [fail-closed consolidation repair](https://github.com/red-cup-engineering/markdown-engineering-services-section/pull/8) must receive native testing and authorized integration before automatic retirement or link retargeting. Corpus scanner output grants no such authority.
 
+Both prose linting and repeated-passage diagnostics use the original source-coordinate protection law in `src/analyze.mjs`. YAML frontmatter, fenced/inline code, Markdown link destinations, tables, explicit and lazy blockquotes, and straight/curly quotations remain source evidence rather than edit suggestions. The scanner still identifies only candidate repetition; its diagnostics grant no permission to rewrite, redirect or retire a document. Tests cover both excluded evidence and ordinary prose after a quotation.
+
 A repository source commit does not establish an installed CLI, PTGAE corpus approval, or downstream reader receiving.
